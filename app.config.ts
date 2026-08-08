@@ -34,17 +34,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // the system picker), and we don't need anything else.
     permissions: []
   },
+  // expo-screen-capture and react-native-quick-crypto were removed from
+  // this list — neither package ships a config plugin for the versions
+  // pinned in package.json (expo-screen-capture@6.0.1,
+  // react-native-quick-crypto@0.7.2). Listing them here made Expo's
+  // config-plugin resolver fall back to require()-ing their main JS
+  // entry as if it were a plugin function, which is what caused the
+  // "does not contain a valid config plugin" / "Unexpected token 'typeof'"
+  // failures. Neither needs any native config: expo-screen-capture is a
+  // pure JS API (call ScreenCapture.preventScreenCaptureAsync() directly),
+  // and react-native-quick-crypto's only requirement is New Architecture,
+  // already satisfied by newArchEnabled: true below.
   plugins: [
     'expo-secure-store',
-    'expo-local-authentication',
-    'expo-screen-capture',
-    [
-      'react-native-quick-crypto',
-      {
-        // Enables the native crypto module — requires the New Architecture,
-        // set above via newArchEnabled.
-      }
-    ]
+    'expo-local-authentication'
   ],
   extra: {
     masterPassword,

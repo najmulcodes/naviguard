@@ -22,7 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     backgroundColor: '#0A1628'
   },
   assetBundlePatterns: ['**/*'],
-  newArchEnabled: false,,
+  newArchEnabled: false,
   android: {
     package: 'com.navicore.naviguard',
     adaptiveIcon: {

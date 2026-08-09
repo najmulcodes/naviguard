@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import 'react-native-quick-base64';
 
 // react-native-quick-crypto's API mirrors Node's crypto module, which
 // works in terms of Buffer. React Native has no Buffer global by default —

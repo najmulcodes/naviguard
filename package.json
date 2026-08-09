@@ -11,25 +11,27 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
     "expo": "~51.0.28",
-    "expo-status-bar": "~1.12.1",
     "expo-constants": "~16.0.2",
-    "expo-secure-store": "~13.0.2",
-    "expo-local-authentication": "~14.0.1",
-    "expo-file-system": "~17.0.1",
-    "expo-screen-capture": "~6.0.1",
     "expo-crypto": "~13.0.2",
+    "expo-dev-client": "~4.0.29",
+    "expo-file-system": "~17.0.1",
+    "expo-local-authentication": "~14.0.1",
+    "expo-screen-capture": "~6.0.1",
+    "expo-secure-store": "~13.0.2",
+    "expo-status-bar": "~1.12.1",
     "react": "18.2.0",
     "react-native": "0.74.5",
+    "react-native-quick-base64": "^3.0.1",
     "react-native-quick-crypto": "^0.7.2",
-    "buffer": "^6.0.3",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@types/react": "~18.2.79",
-    "typescript": "~5.3.3",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "typescript": "~5.3.3"
   },
   "private": true
 }

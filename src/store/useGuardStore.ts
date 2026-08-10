@@ -13,6 +13,9 @@ export type AppScreen =
 interface GuardState {
   screen: AppScreen;
   errorMessage: string | null;
+  /** True while a slow crypto operation (scrypt) is running — drives
+   *  loading indicators so a multi-second wait doesn't look like a freeze. */
+  busy: boolean;
   /** Held ONLY while unlocked. Wiped on lock/background — never persisted. */
   vaultKey: Buffer | null;
 
@@ -30,14 +33,26 @@ interface GuardState {
   clearError: () => void;
 }
 
+/** Turns any thrown value into a readable string — never leaves the UI
+ *  with a silent, unexplained failure. */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 export const useGuardStore = create<GuardState>((set, get) => ({
   screen: 'loading',
   errorMessage: null,
+  busy: false,
   vaultKey: null,
 
   init: async () => {
-    const setUp = await GuardController.isSetUp();
-    set({ screen: setUp ? 'locked' : 'setup' });
+    try {
+      const setUp = await GuardController.isSetUp();
+      set({ screen: setUp ? 'locked' : 'setup' });
+    } catch (err) {
+      set({ screen: 'setup', errorMessage: describeError(err) });
+    }
   },
 
   completeSetup: async (password, confirm, email) => {
@@ -53,23 +68,37 @@ export const useGuardStore = create<GuardState>((set, get) => ({
       set({ errorMessage: 'Enter a valid email for recovery' });
       return false;
     }
-    await GuardController.setupVault(password, email.trim());
-    set({ errorMessage: null, screen: 'locked' });
-    return true;
+    set({ busy: true, errorMessage: null });
+    try {
+      await GuardController.setupVault(password, email.trim());
+      set({ errorMessage: null, screen: 'locked', busy: false });
+      return true;
+    } catch (err) {
+      // Previously this threw silently — the screen just never advanced
+      // with no feedback at all. Every path below now surfaces something.
+      set({ errorMessage: `Setup failed: ${describeError(err)}`, busy: false });
+      return false;
+    }
   },
 
   unlock: async (password) => {
-    const result = await GuardController.unlockWithPassword(password);
-    if (result.type === 'success') {
-      set({
-        vaultKey: result.vaultKey,
-        errorMessage: null,
-        screen: result.mustChangePassword ? 'forceChangePassword' : 'vaultHome'
-      });
-    } else if (result.type === 'wrongCredential') {
-      set({ errorMessage: 'Incorrect password' });
-    } else {
-      set({ screen: 'setup' });
+    set({ busy: true, errorMessage: null });
+    try {
+      const result = await GuardController.unlockWithPassword(password);
+      if (result.type === 'success') {
+        set({
+          vaultKey: result.vaultKey,
+          errorMessage: null,
+          busy: false,
+          screen: result.mustChangePassword ? 'forceChangePassword' : 'vaultHome'
+        });
+      } else if (result.type === 'wrongCredential') {
+        set({ errorMessage: 'Incorrect password', busy: false });
+      } else {
+        set({ screen: 'setup', busy: false });
+      }
+    } catch (err) {
+      set({ errorMessage: describeError(err), busy: false });
     }
   },
 
@@ -80,13 +109,18 @@ export const useGuardStore = create<GuardState>((set, get) => ({
   goToMasterRecovery: () => set({ errorMessage: null, screen: 'masterRecovery' }),
 
   unlockWithMasterPassword: async (masterPassword) => {
-    const result = await GuardController.unlockWithMasterPassword(masterPassword);
-    if (result.type === 'success') {
-      set({ vaultKey: result.vaultKey, errorMessage: null, screen: 'forceChangePassword' });
-    } else if (result.type === 'wrongCredential') {
-      set({ errorMessage: 'That master password is incorrect' });
-    } else {
-      set({ screen: 'setup' });
+    set({ busy: true, errorMessage: null });
+    try {
+      const result = await GuardController.unlockWithMasterPassword(masterPassword);
+      if (result.type === 'success') {
+        set({ vaultKey: result.vaultKey, errorMessage: null, busy: false, screen: 'forceChangePassword' });
+      } else if (result.type === 'wrongCredential') {
+        set({ errorMessage: 'That master password is incorrect', busy: false });
+      } else {
+        set({ screen: 'setup', busy: false });
+      }
+    } catch (err) {
+      set({ errorMessage: describeError(err), busy: false });
     }
   },
 
@@ -104,9 +138,15 @@ export const useGuardStore = create<GuardState>((set, get) => ({
       set({ errorMessage: 'Session expired — please unlock again', screen: 'locked' });
       return false;
     }
-    await GuardController.rotatePassword(vk, newPassword);
-    set({ errorMessage: null, screen: 'vaultHome' });
-    return true;
+    set({ busy: true, errorMessage: null });
+    try {
+      await GuardController.rotatePassword(vk, newPassword);
+      set({ errorMessage: null, screen: 'vaultHome', busy: false });
+      return true;
+    } catch (err) {
+      set({ errorMessage: describeError(err), busy: false });
+      return false;
+    }
   },
 
   openSettings: () => set({ screen: 'settings' }),

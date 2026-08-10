@@ -8,8 +8,7 @@
  */
 
 export interface ScryptParams {
-  /** CPU/memory cost — must be a power of 2. 16384 (2^14) is the current
-   *  OWASP-recommended minimum for interactive logins. */
+  /** CPU/memory cost — must be a power of 2. */
   N: number;
   /** Block size parameter — 8 is the standard default. */
   r: number;
@@ -18,7 +17,21 @@ export interface ScryptParams {
   p: number;
 }
 
-export const DEFAULT_SCRYPT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
+// N=16384 (OWASP's server-side baseline) is genuinely slow in pure JS on a
+// phone — @noble/hashes has no native acceleration, and Hermes (RN's JS
+// engine) has no JIT, so scrypt's memory-hard cost function runs as
+// interpreted bytecode the whole way through. N=16384 measured 10+ seconds
+// on mid-range Android hardware during testing — long enough to look like
+// the app had frozen with no loading indicator.
+//
+// N=4096 (2^12) trades some brute-force resistance for a sub-second-to-
+// low-seconds derivation time, which is the right call for THIS app: the
+// realistic attacker model is someone with your phone in hand trying
+// passwords by typing them into the UI (rate-limited by human typing speed
+// and by re-running this same slow KDF each attempt), not an offline GPU
+// farm with the wrapped key slot exfiltrated. If that threat model changes
+// later, raise this back toward 16384 and accept the UX cost.
+export const DEFAULT_SCRYPT_PARAMS: ScryptParams = { N: 4096, r: 8, p: 1 };
 
 export interface WrappedKeySlot {
   /** Base64, random salt fed into scrypt. 16 bytes, unique per slot. */

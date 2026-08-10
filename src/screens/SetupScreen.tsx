@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { shared } from '../theme/styles';
+import { colors } from '../theme/colors';
 import { useGuardStore } from '../store/useGuardStore';
 
 export default function SetupScreen() {
@@ -8,6 +9,7 @@ export default function SetupScreen() {
   const [confirm, setConfirm] = useState('');
   const [email, setEmail] = useState('');
   const errorMessage = useGuardStore((s) => s.errorMessage);
+  const busy = useGuardStore((s) => s.busy);
   const completeSetup = useGuardStore((s) => s.completeSetup);
 
   return (
@@ -25,6 +27,7 @@ export default function SetupScreen() {
         placeholder="Password"
         placeholderTextColor="#4E6480"
         secureTextEntry
+        editable={!busy}
         value={password}
         onChangeText={setPassword}
       />
@@ -33,6 +36,7 @@ export default function SetupScreen() {
         placeholder="Confirm password"
         placeholderTextColor="#4E6480"
         secureTextEntry
+        editable={!busy}
         value={confirm}
         onChangeText={setConfirm}
       />
@@ -42,6 +46,7 @@ export default function SetupScreen() {
         placeholderTextColor="#4E6480"
         autoCapitalize="none"
         keyboardType="email-address"
+        editable={!busy}
         value={email}
         onChangeText={setEmail}
       />
@@ -53,11 +58,25 @@ export default function SetupScreen() {
       {errorMessage && <Text style={shared.errorText}>{errorMessage}</Text>}
 
       <TouchableOpacity
-        style={shared.primaryButton}
+        style={[shared.primaryButton, busy && { opacity: 0.6 }]}
+        disabled={busy}
         onPress={() => completeSetup(password, confirm, email)}
       >
-        <Text style={shared.primaryButtonText}>Create Vault</Text>
+        {busy ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <ActivityIndicator color={colors.navyDeep} style={{ marginRight: 10 }} />
+            <Text style={shared.primaryButtonText}>Creating vault…</Text>
+          </View>
+        ) : (
+          <Text style={shared.primaryButtonText}>Create Vault</Text>
+        )}
       </TouchableOpacity>
+      {busy && (
+        <Text style={[shared.body, { marginTop: 8 }]}>
+          This can take a few seconds on first setup — deriving your encryption key on purpose
+          takes real work, that's what makes it resistant to guessing.
+        </Text>
+      )}
     </ScrollView>
   );
 }

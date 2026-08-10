@@ -11,6 +11,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@noble/hashes": "^2.3.0",
     "buffer": "^6.0.3",
     "expo": "~51.0.28",
     "expo-constants": "~16.0.2",

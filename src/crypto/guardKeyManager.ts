@@ -1,4 +1,5 @@
 import crypto from 'react-native-quick-crypto';
+import { scryptAsync } from '@noble/hashes/scrypt';
 import { randomBytes } from './randomBytes';
 import {
   DEFAULT_SCRYPT_PARAMS,
@@ -26,19 +27,20 @@ export function generateVaultKey(): Buffer {
   return randomBytes(VAULT_KEY_LENGTH_BYTES);
 }
 
-function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    crypto.scrypt(
-      secret,
-      salt,
-      VAULT_KEY_LENGTH_BYTES,
-      { N: params.N, r: params.r, p: params.p },
-      (err: Error | null, derivedKey: Buffer) => {
-        if (err) reject(err);
-        else resolve(derivedKey);
-      }
-    );
+async function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Promise<Buffer> {
+  // react-native-quick-crypto does NOT implement scrypt/scryptSync —
+  // confirmed missing on the library's own GitHub
+  // (margelo/react-native-quick-crypto#737), not a version/naming issue.
+  // @noble/hashes is pure JS/TS, audited, no native module — sidesteps
+  // the whole category of native-linking bugs this project has hit.
+  const passwordBytes = Buffer.from(secret, 'utf8');
+  const derived = await scryptAsync(passwordBytes, salt, {
+    N: params.N,
+    r: params.r,
+    p: params.p,
+    dkLen: VAULT_KEY_LENGTH_BYTES
   });
+  return Buffer.from(derived);
 }
 
 function aesGcmEncrypt(key: Buffer, nonce: Buffer, plaintext: Buffer): Buffer {

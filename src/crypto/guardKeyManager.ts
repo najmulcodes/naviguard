@@ -1,4 +1,5 @@
 import crypto from 'react-native-quick-crypto';
+import { randomBytes } from './randomBytes';
 import {
   DEFAULT_SCRYPT_PARAMS,
   ScryptParams,
@@ -22,7 +23,7 @@ const SCRYPT_SALT_LENGTH_BYTES = 16;
  */
 
 export function generateVaultKey(): Buffer {
-  return crypto.randomBytes(VAULT_KEY_LENGTH_BYTES);
+  return randomBytes(VAULT_KEY_LENGTH_BYTES);
 }
 
 function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Promise<Buffer> {
@@ -63,9 +64,9 @@ async function createSlot(
   vaultKey: Buffer,
   params: ScryptParams
 ): Promise<WrappedKeySlot> {
-  const salt = crypto.randomBytes(SCRYPT_SALT_LENGTH_BYTES);
+  const salt = randomBytes(SCRYPT_SALT_LENGTH_BYTES);
   const kek = await deriveKek(secret, salt, params);
-  const nonce = crypto.randomBytes(GCM_NONCE_LENGTH_BYTES);
+  const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
   const wrapped = aesGcmEncrypt(kek, nonce, vaultKey);
 
   return {

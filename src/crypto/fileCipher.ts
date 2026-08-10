@@ -1,4 +1,5 @@
 import crypto from 'react-native-quick-crypto';
+import { randomBytes } from './randomBytes';
 import * as FileSystem from 'expo-file-system';
 
 const { StorageAccessFramework } = FileSystem;
@@ -23,7 +24,7 @@ const AUTH_TAG_LENGTH_BYTES = 16;
  */
 
 function encryptBuffer(key: Buffer, plaintext: Buffer): Buffer {
-  const nonce = crypto.randomBytes(GCM_NONCE_LENGTH_BYTES);
+  const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const authTag = cipher.getAuthTag();

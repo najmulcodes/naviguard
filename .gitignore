@@ -13,3 +13,5 @@ web-build/
 android/
 ios/
 .DS_Store
+.idea/
+*.iml

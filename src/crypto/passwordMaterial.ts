@@ -1,9 +1,9 @@
-import crypto from 'react-native-quick-crypto';
+import { randomBytes } from './randomBytes';
 
 const INSTALL_SALT_LENGTH_BYTES = 16;
 
 export function generateInstallSalt(): string {
-  return crypto.randomBytes(INSTALL_SALT_LENGTH_BYTES).toString('base64');
+  return randomBytes(INSTALL_SALT_LENGTH_BYTES).toString('base64');
 }
 
 /**

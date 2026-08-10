@@ -1,6 +1,9 @@
 # NaviGuard (Expo)
 *by NAVICORE — "Guard what matters."*
 
+**v2** — adds the Hidden Gallery: browse locked photos without ever writing
+plaintext back to disk.
+
 Locks files on an OTG USB drive behind a password, with real recovery via
 a master password you hold. No ads, non-commercial, built for you and a
 few friends via your existing Expo project (`najmulcodes/naviguard`,
@@ -9,6 +12,33 @@ few friends via your existing Expo project (`najmulcodes/naviguard`,
 This is the Expo/React Native rewrite of the original native-Android
 version. See "Why the design changed" below before assuming parity with
 that version's exact guarantees.
+
+---
+
+## What's new in v2
+
+- **Hidden Gallery** (`src/screens/HiddenGalleryScreen.tsx`) — a photo grid
+  that decrypts locked images entirely IN MEMORY for viewing. The `.nvg`
+  file on disk is never touched, never rewritten to plaintext, so photos
+  stay invisible to Gallery/Photos the whole time you're browsing them in
+  NaviGuard. Previously, viewing a locked photo meant fully unlocking it
+  (writing plaintext back), which made it visible to every other app
+  again — defeating the point for casual browsing.
+- **Saved folder shortcuts** (`src/vault/folderShortcuts.ts`) — name and
+  remember folders (e.g., "Hidden Photos") instead of re-picking the same
+  folder via the system picker every session.
+- **Known limitation:** gallery thumbnails decrypt the FULL-resolution
+  image, not a downscaled preview. Fine for a personal collection in the
+  tens/low hundreds of photos; will get slow and memory-heavy well beyond
+  that — a real thumbnail cache is the natural next step if this becomes
+  the most-used feature.
+- **iOS: deliberately not started.** Android's Storage Access Framework
+  (the mechanism this whole app is built on) has no iOS equivalent — Apple
+  doesn't allow third-party apps to browse/write arbitrary external
+  storage. An iOS version would need a genuinely different approach
+  (iOS's Files app / document picker instead of USB drives) and is
+  intentionally deferred until the Android version is validated with
+  real users.
 
 ---
 

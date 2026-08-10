@@ -11,7 +11,33 @@ export interface VaultFile {
   uri: string;
   displayName: string;
   isLocked: boolean;
+  isImage: boolean;
 }
+
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic']);
+
+function guessMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'bmp':
+      return 'image/bmp';
+    case 'heic':
+      return 'image/heic';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+export { guessMimeType };
 
 export type VaultProgress =
   | { type: 'progress'; current: number; total: number; fileName: string }
@@ -41,10 +67,13 @@ export async function listFiles(folderUri: string): Promise<VaultFile[]> {
   return childUris.map((uri) => {
     const name = nameFromUri(uri);
     const isLocked = name.endsWith(LOCKED_SUFFIX);
+    const displayName = isLocked ? name.slice(0, -LOCKED_SUFFIX.length) : name;
+    const ext = displayName.split('.').pop()?.toLowerCase() ?? '';
     return {
       uri,
-      displayName: isLocked ? name.slice(0, -LOCKED_SUFFIX.length) : name,
-      isLocked
+      displayName,
+      isLocked,
+      isImage: IMAGE_EXTENSIONS.has(ext)
     };
   });
 }

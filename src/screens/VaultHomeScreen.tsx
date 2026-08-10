@@ -9,6 +9,7 @@ import type { VaultFile } from '../vault/vaultFolderManager';
 export default function VaultHomeScreen() {
   const vaultKey = useGuardStore((s) => s.vaultKey);
   const openSettings = useGuardStore((s) => s.openSettings);
+  const openHiddenGallery = useGuardStore((s) => s.openHiddenGallery);
 
   const [folderUri, setFolderUri] = useState<string | null>(null);
   const [files, setFiles] = useState<VaultFile[]>([]);
@@ -57,9 +58,14 @@ export default function VaultHomeScreen() {
         <Text style={{ color: colors.textPrimary, fontSize: 22, fontWeight: '700' }}>
           NaviGuard
         </Text>
-        <TouchableOpacity onPress={openSettings}>
-          <Text style={{ color: colors.goldPrimary, fontSize: 15 }}>Settings</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 20 }}>
+          <TouchableOpacity onPress={openHiddenGallery}>
+            <Text style={{ color: colors.goldPrimary, fontSize: 15 }}>🖼 Gallery</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={openSettings}>
+            <Text style={{ color: colors.goldPrimary, fontSize: 15 }}>Settings</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={{ flex: 1, paddingHorizontal: 20 }}>

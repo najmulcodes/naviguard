@@ -8,6 +8,7 @@ export type AppScreen =
   | 'masterRecovery'
   | 'forceChangePassword'
   | 'vaultHome'
+  | 'hiddenGallery'
   | 'settings';
 
 interface GuardState {
@@ -27,6 +28,7 @@ interface GuardState {
   unlockWithMasterPassword: (masterPassword: string) => Promise<void>;
   completeForcedPasswordChange: (newPassword: string, confirm: string) => Promise<boolean>;
   openSettings: () => void;
+  openHiddenGallery: () => void;
   backToVaultHome: () => void;
   cancelRecovery: () => void;
   lockAndClearSession: () => void;
@@ -150,6 +152,7 @@ export const useGuardStore = create<GuardState>((set, get) => ({
   },
 
   openSettings: () => set({ screen: 'settings' }),
+  openHiddenGallery: () => set({ screen: 'hiddenGallery' }),
   backToVaultHome: () => set({ screen: 'vaultHome' }),
   cancelRecovery: () => set({ errorMessage: null, screen: 'locked' }),
 
@@ -157,7 +160,10 @@ export const useGuardStore = create<GuardState>((set, get) => ({
     const { screen, vaultKey } = get();
     vaultKey?.fill(0);
     const wasUnlockedArea =
-      screen === 'vaultHome' || screen === 'settings' || screen === 'forceChangePassword';
+      screen === 'vaultHome' ||
+      screen === 'settings' ||
+      screen === 'hiddenGallery' ||
+      screen === 'forceChangePassword';
     set({
       vaultKey: null,
       screen: wasUnlockedArea ? 'locked' : screen

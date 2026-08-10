@@ -63,3 +63,30 @@ export async function decryptFile(sourceUri: string, destUri: string, vaultKey: 
     encoding: FileSystem.EncodingType.Base64
   });
 }
+
+/**
+ * Decrypts a locked file entirely IN MEMORY and returns it as a base64
+ * data URI — suitable for direct use as an <Image source={{uri}}> or
+ * similar. Unlike decryptFile, this never writes plaintext back to the
+ * drive: the ciphertext file on disk is completely untouched, so the
+ * photo stays invisible to Gallery/Photos/any other app the whole time
+ * you're viewing it in NaviGuard. This is what makes the Hidden Gallery
+ * feature actually private, not just "temporarily visible while browsing."
+ *
+ * [mimeType] is a best-effort guess for the data URI header — wrong MIME
+ * type won't break decryption (that's still authenticated/verified by
+ * GCM), it would only affect whether the OS renders it correctly as an
+ * image. See vaultFolderManager.ts's guessMimeType for the lookup.
+ */
+export async function decryptToDataUri(
+  sourceUri: string,
+  vaultKey: Buffer,
+  mimeType: string
+): Promise<string> {
+  const base64 = await StorageAccessFramework.readAsStringAsync(sourceUri, {
+    encoding: FileSystem.EncodingType.Base64
+  });
+  const payload = Buffer.from(base64, 'base64');
+  const decrypted = decryptBuffer(vaultKey, payload); // throws on wrong key / tampered file
+  return `data:${mimeType};base64,${decrypted.toString('base64')}`;
+}

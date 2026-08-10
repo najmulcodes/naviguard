@@ -9,6 +9,7 @@ import UnlockScreen from './src/screens/UnlockScreen';
 import MasterRecoveryScreen from './src/screens/MasterRecoveryScreen';
 import ForceChangePasswordScreen from './src/screens/ForceChangePasswordScreen';
 import VaultHomeScreen from './src/screens/VaultHomeScreen';
+import HiddenGalleryScreen from './src/screens/HiddenGalleryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 export default function App() {
@@ -52,6 +53,7 @@ export default function App() {
       {screen === 'masterRecovery' && <MasterRecoveryScreen />}
       {screen === 'forceChangePassword' && <ForceChangePasswordScreen />}
       {screen === 'vaultHome' && <VaultHomeScreen />}
+      {screen === 'hiddenGallery' && <HiddenGalleryScreen />}
       {screen === 'settings' && <SettingsScreen />}
       {/* 'loading' renders nothing while init() resolves setup-state check */}
     </View>

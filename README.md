@@ -15,6 +15,26 @@ that version's exact guarantees.
 
 ---
 
+## What's new in v2.1
+
+- **Fixed: Android hardware/gesture back button was exiting the app** from
+  sub-screens (Settings, Hidden Gallery) instead of navigating back. Never
+  intercepted before — this app doesn't use React Navigation, so there was
+  nothing catching the default OS back behavior. Now handled centrally in
+  `App.tsx`.
+- **Fixed: no client-side guard against submitting an empty password** on
+  the Unlock screen. The button is now disabled until something's typed —
+  defense in depth regardless of what triggered the original report.
+- **New: per-file selection for Lock/Unlock**, not just whole-folder bulk
+  actions. Tap a file row to select it; Lock/Unlock then act only on the
+  selection. Leave nothing selected and they act on everything, same as
+  before — existing bulk workflow isn't lost, just no longer the only
+  option. (`vaultFolderManager.ts`'s `lockFolder`/`unlockFolder` are now
+  thin wrappers around new `lockFiles`/`unlockFiles`, which take an
+  explicit file list.)
+
+---
+
 ## What's new in v2
 
 - **Hidden Gallery** (`src/screens/HiddenGalleryScreen.tsx`) — a photo grid

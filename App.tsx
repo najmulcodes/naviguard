@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { AppState, AppStateStatus, StatusBar, View } from 'react-native';
+import { AppState, AppStateStatus, BackHandler, StatusBar, View } from 'react-native';
 import * as ScreenCapture from 'expo-screen-capture';
 import { useGuardStore } from './src/store/useGuardStore';
 import { colors } from './src/theme/colors';
@@ -16,6 +16,8 @@ export default function App() {
   const screen = useGuardStore((s) => s.screen);
   const init = useGuardStore((s) => s.init);
   const lockAndClearSession = useGuardStore((s) => s.lockAndClearSession);
+  const backToVaultHome = useGuardStore((s) => s.backToVaultHome);
+  const cancelRecovery = useGuardStore((s) => s.cancelRecovery);
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
   // This is a security app — block screenshots/screen recording and hide
@@ -44,6 +46,37 @@ export default function App() {
     });
     return () => subscription.remove();
   }, [lockAndClearSession]);
+
+  // We don't use React Navigation, so Android's hardware/gesture back
+  // button was never intercepted — it fell through to the OS default of
+  // exiting the app entirely, even from a sub-screen like Settings.
+  // This maps back to a sensible in-app destination per screen instead.
+  // Returning true means "handled, don't exit"; false lets the OS do its
+  // default thing (which is correct at the true root screens).
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      switch (screen) {
+        case 'settings':
+        case 'hiddenGallery':
+          backToVaultHome();
+          return true;
+        case 'masterRecovery':
+          cancelRecovery();
+          return true;
+        case 'forceChangePassword':
+          // Intentionally no back path — using the master password always
+          // forces completing a new password before anything else is
+          // reachable. Swallow the event, do nothing.
+          return true;
+        default:
+          // 'vaultHome', 'locked', 'setup': these are root screens for
+          // their respective states — default OS back behavior (exit/
+          // background the app) is correct here, not a bug.
+          return false;
+      }
+    });
+    return () => subscription.remove();
+  }, [screen, backToVaultHome, cancelRecovery]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.navyBase }}>

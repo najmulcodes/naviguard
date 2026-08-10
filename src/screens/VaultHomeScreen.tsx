@@ -13,11 +13,13 @@ export default function VaultHomeScreen() {
 
   const [folderUri, setFolderUri] = useState<string | null>(null);
   const [files, setFiles] = useState<VaultFile[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [progressText, setProgressText] = useState('');
 
   async function refresh(uri: string) {
     setFiles(await VaultFolderManager.listFiles(uri));
+    setSelected(new Set()); // selection is per-listing; a fresh file list invalidates it
   }
 
   async function choosePress() {
@@ -26,6 +28,15 @@ export default function VaultHomeScreen() {
       setFolderUri(uri);
       await refresh(uri);
     }
+  }
+
+  function toggleSelect(uri: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(uri)) next.delete(uri);
+      else next.add(uri);
+      return next;
+    });
   }
 
   async function runOp(
@@ -42,6 +53,27 @@ export default function VaultHomeScreen() {
     }
     setBusy(false);
     await refresh(folderUri);
+  }
+
+  async function runLock() {
+    if (!folderUri) return;
+    // Selection, if any, filters to just those files — but only the ones
+    // that are actually lockable (unlocked). Selecting a mix of locked
+    // and unlocked files and hitting "Lock" only acts on the unlocked ones.
+    const targets =
+      selected.size > 0
+        ? files.filter((f) => selected.has(f.uri) && !f.isLocked)
+        : files.filter((f) => !f.isLocked);
+    await runOp((uri, key) => VaultFolderManager.lockFiles(uri, targets, key));
+  }
+
+  async function runUnlock() {
+    if (!folderUri) return;
+    const targets =
+      selected.size > 0
+        ? files.filter((f) => selected.has(f.uri) && f.isLocked)
+        : files.filter((f) => f.isLocked);
+    await runOp((uri, key) => VaultFolderManager.unlockFiles(uri, targets, key));
   }
 
   return (
@@ -89,7 +121,7 @@ export default function VaultHomeScreen() {
                 flexDirection: 'row',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: 12
+                marginBottom: 4
               }}
             >
               <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '600' }}>
@@ -100,6 +132,12 @@ export default function VaultHomeScreen() {
               </TouchableOpacity>
             </View>
 
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+              {selected.size > 0
+                ? `${selected.size} selected — Lock/Unlock will act on just these`
+                : 'Tap a file to select just that one, or leave nothing selected to act on all'}
+            </Text>
+
             {busy && (
               <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
                 {progressText}
@@ -109,46 +147,76 @@ export default function VaultHomeScreen() {
             <FlatList
               data={files}
               keyExtractor={(item) => item.uri}
-              renderItem={({ item }) => (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingVertical: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: '#1E2E42'
-                  }}
-                >
-                  <Text
+              renderItem={({ item }) => {
+                const isSelected = selected.has(item.uri);
+                return (
+                  <TouchableOpacity
+                    onPress={() => toggleSelect(item.uri)}
                     style={{
-                      color: item.isLocked ? colors.goldPrimary : colors.textSecondary,
-                      marginRight: 10,
-                      fontSize: 16
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      borderBottomWidth: 1,
+                      borderBottomColor: '#1E2E42',
+                      backgroundColor: isSelected ? colors.navyElevated : 'transparent',
+                      paddingHorizontal: isSelected ? 8 : 0,
+                      borderRadius: isSelected ? 8 : 0
                     }}
                   >
-                    {item.isLocked ? '🔒' : '🔓'}
-                  </Text>
-                  <Text style={{ color: colors.textPrimary, fontSize: 15 }}>
-                    {item.displayName}
-                  </Text>
-                </View>
-              )}
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 4,
+                        borderWidth: 1.5,
+                        borderColor: isSelected ? colors.goldPrimary : colors.textSecondary,
+                        backgroundColor: isSelected ? colors.goldPrimary : 'transparent',
+                        marginRight: 12,
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {isSelected && (
+                        <Text style={{ color: colors.navyDeep, fontSize: 12, fontWeight: '700' }}>
+                          ✓
+                        </Text>
+                      )}
+                    </View>
+                    <Text
+                      style={{
+                        color: item.isLocked ? colors.goldPrimary : colors.textSecondary,
+                        marginRight: 10,
+                        fontSize: 16
+                      }}
+                    >
+                      {item.isLocked ? '🔒' : '🔓'}
+                    </Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 15, flex: 1 }}>
+                      {item.displayName}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
             />
 
             <View style={{ flexDirection: 'row', gap: 12, marginVertical: 16 }}>
               <TouchableOpacity
                 style={[shared.primaryButton, { flex: 1, marginTop: 0 }]}
                 disabled={busy}
-                onPress={() => runOp(VaultFolderManager.lockFolder)}
+                onPress={runLock}
               >
-                <Text style={shared.primaryButtonText}>🔒 Lock</Text>
+                <Text style={shared.primaryButtonText}>
+                  🔒 Lock{selected.size > 0 ? ` (${selected.size})` : ' All'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[shared.secondaryButton, { flex: 1, marginTop: 0 }]}
                 disabled={busy}
-                onPress={() => runOp(VaultFolderManager.unlockFolder)}
+                onPress={runUnlock}
               >
-                <Text style={shared.secondaryButtonText}>🔓 Unlock</Text>
+                <Text style={shared.secondaryButtonText}>
+                  🔓 Unlock{selected.size > 0 ? ` (${selected.size})` : ' All'}
+                </Text>
               </TouchableOpacity>
             </View>
           </>

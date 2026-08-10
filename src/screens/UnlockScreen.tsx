@@ -39,8 +39,8 @@ export default function UnlockScreen() {
       {errorMessage && <Text style={shared.errorText}>{errorMessage}</Text>}
 
       <TouchableOpacity
-        style={[shared.primaryButton, busy && { opacity: 0.6 }]}
-        disabled={busy}
+        style={[shared.primaryButton, (busy || password.length === 0) && { opacity: 0.6 }]}
+        disabled={busy || password.length === 0}
         onPress={() => unlock(password)}
       >
         {busy ? (

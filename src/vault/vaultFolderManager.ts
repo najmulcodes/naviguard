@@ -78,14 +78,16 @@ export async function listFiles(folderUri: string): Promise<VaultFile[]> {
   });
 }
 
-/** Encrypts every currently-unlocked file, deletes the plaintext original after each success. */
-export async function* lockFolder(
+/**
+ * Encrypts each file in [targets], deletes the plaintext original after
+ * each individual success. Works against any subset of a folder's files —
+ * lockFolder() below is just this called with "every unlocked file."
+ */
+export async function* lockFiles(
   folderUri: string,
+  targets: VaultFile[],
   vaultKey: Buffer
 ): AsyncGenerator<VaultProgress> {
-  const files = await listFiles(folderUri);
-  const targets = files.filter((f) => !f.isLocked);
-
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i];
     yield { type: 'progress', current: i + 1, total: targets.length, fileName: file.displayName };
@@ -104,14 +106,16 @@ export async function* lockFolder(
   yield { type: 'done', filesProcessed: targets.length };
 }
 
-/** Decrypts every locked (.nvg) file back to plaintext, deletes the ciphertext after each success. */
-export async function* unlockFolder(
+/**
+ * Decrypts each locked file in [targets] back to plaintext, deletes the
+ * ciphertext after each individual success. unlockFolder() below is just
+ * this called with "every locked file."
+ */
+export async function* unlockFiles(
   folderUri: string,
+  targets: VaultFile[],
   vaultKey: Buffer
 ): AsyncGenerator<VaultProgress> {
-  const files = await listFiles(folderUri);
-  const targets = files.filter((f) => f.isLocked);
-
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i];
     yield { type: 'progress', current: i + 1, total: targets.length, fileName: file.displayName };
@@ -128,4 +132,22 @@ export async function* unlockFolder(
     }
   }
   yield { type: 'done', filesProcessed: targets.length };
+}
+
+/** Convenience: encrypts every currently-unlocked file in the folder. */
+export async function* lockFolder(
+  folderUri: string,
+  vaultKey: Buffer
+): AsyncGenerator<VaultProgress> {
+  const files = await listFiles(folderUri);
+  yield* lockFiles(folderUri, files.filter((f) => !f.isLocked), vaultKey);
+}
+
+/** Convenience: decrypts every currently-locked file in the folder. */
+export async function* unlockFolder(
+  folderUri: string,
+  vaultKey: Buffer
+): AsyncGenerator<VaultProgress> {
+  const files = await listFiles(folderUri);
+  yield* unlockFiles(folderUri, files.filter((f) => f.isLocked), vaultKey);
 }

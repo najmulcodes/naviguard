@@ -11,7 +11,6 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
-    "@noble/hashes": "^2.3.0",
     "buffer": "^6.0.3",
     "expo": "~51.0.28",
     "expo-constants": "~16.0.2",
@@ -26,7 +25,8 @@
     "react-native": "0.74.5",
     "react-native-quick-base64": "2.2.2",
     "react-native-quick-crypto": "^0.7.2",
-    "zustand": "^4.5.4"
+    "zustand": "^4.5.4",
+    "@noble/hashes": "^1.5.0"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

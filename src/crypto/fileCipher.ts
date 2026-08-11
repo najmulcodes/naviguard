@@ -1,11 +1,10 @@
-import crypto from 'react-native-quick-crypto';
+import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes } from './randomBytes';
 import * as FileSystem from 'expo-file-system';
 
 const { StorageAccessFramework } = FileSystem;
 
 const GCM_NONCE_LENGTH_BYTES = 12;
-const AUTH_TAG_LENGTH_BYTES = 16;
 
 /**
  * Encrypts/decrypts individual files using the Vault Key.
@@ -18,27 +17,25 @@ const AUTH_TAG_LENGTH_BYTES = 16;
  * MB on a typical phone, not disk size. Fine for documents/photos/most
  * personal files; don't rely on this for multi-GB video vaulting.
  *
- * AES-256-GCM is still fully authenticated — corruption/tampering is
- * detected via the auth tag exactly as before, this only changes HOW
- * much of the file sits in memory at once, not the security properties.
+ * AES-256-GCM via @noble/ciphers, NOT react-native-quick-crypto — see
+ * guardKeyManager.ts for the full explanation. Same underlying bug would
+ * have affected file lock/unlock too (this is the exact same primitive),
+ * so this needed the same fix, not just the key-wrapping code.
  */
 
 function encryptBuffer(key: Buffer, plaintext: Buffer): Buffer {
   const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  // Layout: [12-byte nonce][ciphertext][16-byte auth tag]
-  return Buffer.concat([nonce, ciphertext, authTag]);
+  const cipher = gcm(key, nonce);
+  const ciphertext = Buffer.from(cipher.encrypt(plaintext)); // tag appended internally
+  // Layout: [12-byte nonce][ciphertext+tag]
+  return Buffer.concat([nonce, ciphertext]);
 }
 
 function decryptBuffer(key: Buffer, payload: Buffer): Buffer {
   const nonce = payload.subarray(0, GCM_NONCE_LENGTH_BYTES);
-  const authTag = payload.subarray(payload.length - AUTH_TAG_LENGTH_BYTES);
-  const ciphertext = payload.subarray(GCM_NONCE_LENGTH_BYTES, payload.length - AUTH_TAG_LENGTH_BYTES);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if tampered/wrong key
+  const ciphertextAndTag = payload.subarray(GCM_NONCE_LENGTH_BYTES);
+  const cipher = gcm(key, nonce);
+  return Buffer.from(cipher.decrypt(ciphertextAndTag)); // throws if tampered/wrong key
 }
 
 /** [sourceUri] and [destUri] are SAF document URIs (from VaultFolderManager). */

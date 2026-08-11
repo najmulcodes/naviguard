@@ -1,4 +1,4 @@
-import crypto from 'react-native-quick-crypto';
+import { gcm } from '@noble/ciphers/aes.js';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { randomBytes } from './randomBytes';
 import {
@@ -15,30 +15,16 @@ const SCRYPT_SALT_LENGTH_BYTES = 16;
 // decrypting with a candidate password, we check this marker matches
 // BEFORE trusting the result as a real Vault Key.
 //
-// Why this exists: AES-GCM's auth tag is supposed to make decryption
-// with the wrong key throw, not return garbage. During testing, ANY
-// password (including deliberately wrong ones) was successfully
-// "unlocking" the app — meaning react-native-quick-crypto's GCM
-// decryption was not reliably rejecting bad keys via the tag check
-// alone. Rather than trust that check (from a library that's already
-// been missing documented functions — see deriveKek below), this canary
-// makes wrong-password rejection independent of whatever quick-crypto's
-// GCM implementation does or doesn't verify internally. Decrypting
-// garbage ciphertext with a wrong key produces effectively random bytes;
-// the odds of 12 random bytes matching this exact constant are 1 in
-// 2^96 — not a real risk to worry about.
+// Originally added because react-native-quick-crypto's AES-GCM was
+// accepting wrong passwords (auth tag not reliably rejecting bad keys).
+// Kept even after moving to @noble/ciphers below — it's cheap, harmless,
+// and a genuine defense-in-depth layer regardless of which cipher
+// implementation is doing the underlying work.
 //
-// IMPORTANT: this changes the wrapped-slot payload format. Any vault
-// created before this fix will fail to unlock afterward (canary won't be
-// present in old ciphertext) — expected, not a new bug. Uninstall and
-// re-run Setup on any device that was using a pre-canary build.
-//
-// Kept as a plain string here, NOT Buffer.from(...) at module level —
-// calling Buffer at module-load time caused a real crash ("Property
-// 'Buffer' doesn't exist") because this module can load before index.ts's
-// Buffer polyfill has run, depending on import order. Buffer conversion
-// happens lazily inside the functions below instead, well after the app
-// has fully started and the polyfill is guaranteed to exist.
+// Kept as a plain string here, NOT converted to Buffer at module level —
+// calling Buffer at module-load time previously caused a real crash
+// ("Property 'Buffer' doesn't exist") due to import-hoisting order.
+// Buffer conversion happens lazily inside the functions below instead.
 const CANARY_STRING = 'NVGRD-VALID!'; // exactly 12 bytes in utf8
 const CANARY_LENGTH_BYTES = 12;
 
@@ -62,8 +48,6 @@ async function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Pr
   // react-native-quick-crypto does NOT implement scrypt/scryptSync —
   // confirmed missing on the library's own GitHub
   // (margelo/react-native-quick-crypto#737), not a version/naming issue.
-  // @noble/hashes is pure JS/TS, audited, no native module — sidesteps
-  // the whole category of native-linking bugs this project has hit.
   const passwordBytes = Buffer.from(secret, 'utf8');
   const derived = await scryptAsync(passwordBytes, salt, {
     N: params.N,
@@ -74,27 +58,34 @@ async function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Pr
   return Buffer.from(derived);
 }
 
+// AES-256-GCM via @noble/ciphers, NOT react-native-quick-crypto.
+//
+// Switched after react-native-quick-crypto's AES-GCM demonstrated TWO
+// independent correctness failures during testing: (1) wrong passwords
+// were being accepted as valid, and (2) the genuinely correct password
+// was then failing the canary check added to fix (1) — meaning
+// decrypt(encrypt(x)) wasn't reliably reproducing x even with the right
+// key. Two failures on the same primitive from the same library, on top
+// of the already-confirmed missing scrypt implementation, is a pattern,
+// not a one-off. @noble/ciphers is pure JS/TS, audited, no native module —
+// eliminates this entire class of bug the same way @noble/hashes did for
+// the KDF. This also touches fileCipher.ts (actual file lock/unlock),
+// which used the exact same broken primitive.
+//
+// @noble/ciphers' gcm(key, nonce).encrypt()/.decrypt() append/verify the
+// 16-byte auth tag internally — no manual splitting needed, unlike the
+// old createCipheriv/getAuthTag dance.
+
 function aesGcmEncrypt(key: Buffer, nonce: Buffer, plaintext: Buffer): Buffer {
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
-  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  // Append the 16-byte auth tag — kept together with ciphertext so
-  // unwrap only needs to store/pass one blob.
-  return Buffer.concat([encrypted, authTag]);
+  const cipher = gcm(key, nonce);
+  return Buffer.from(cipher.encrypt(plaintext));
 }
 
 function aesGcmDecrypt(key: Buffer, nonce: Buffer, ciphertextAndTag: Buffer): Buffer {
-  const authTag = ciphertextAndTag.subarray(ciphertextAndTag.length - 16);
-  const ciphertext = ciphertextAndTag.subarray(0, ciphertextAndTag.length - 16);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
-  decipher.setAuthTag(authTag);
-  // NOTE: this throwing on a bad tag is what SHOULD detect a wrong
-  // password. Testing showed it isn't reliable on its own with this
-  // library — see the CANARY check in tryUnlock, which is the real
-  // safety net now. This function/comment is left as-is deliberately;
-  // whatever quick-crypto does here, right or wrong, no longer matters
-  // on its own.
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  const cipher = gcm(key, nonce);
+  // Throws on auth tag mismatch — @noble/ciphers verifies this correctly,
+  // confirmed against its own documented behavior, not assumed this time.
+  return Buffer.from(cipher.decrypt(ciphertextAndTag));
 }
 
 async function createSlot(
@@ -105,7 +96,7 @@ async function createSlot(
   const salt = randomBytes(SCRYPT_SALT_LENGTH_BYTES);
   const kek = await deriveKek(secret, salt, params);
   const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
-  const canary = Buffer.from(CANARY_STRING, 'utf8'); // converted here, not at module load
+  const canary = Buffer.from(CANARY_STRING, 'utf8');
   const payload = Buffer.concat([canary, vaultKey]); // canary FIRST, then the real key
   const wrapped = aesGcmEncrypt(kek, nonce, payload);
 
@@ -139,9 +130,8 @@ export function createMasterSlot(
 
 /**
  * Attempts to unwrap [slot] using [secret]. Returns null on wrong
- * password/master-password. The real check is the CANARY comparison
- * below, not just whichever exception GCM decryption may or may not
- * throw — see the comment on CANARY above for why.
+ * password/master-password — both the GCM auth tag (now @noble/ciphers,
+ * verified correct) AND the canary check protect this.
  */
 export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<Buffer | null> {
   try {
@@ -154,14 +144,14 @@ export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<B
     if (decrypted.length !== CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES) {
       return null; // wrong length — definitely not a real unwrap
     }
-    const canary = Buffer.from(CANARY_STRING, 'utf8'); // converted here, not at module load
+    const canary = Buffer.from(CANARY_STRING, 'utf8');
     const canaryPart = decrypted.subarray(0, CANARY_LENGTH_BYTES);
     if (!canaryPart.equals(canary)) {
-      return null; // wrong password — canary mismatch, the real check
+      return null; // wrong password — canary mismatch
     }
     return decrypted.subarray(CANARY_LENGTH_BYTES);
   } catch {
-    return null; // wrong credential, corrupt data, or a native-layer throw
+    return null; // wrong credential, corrupt data, or an auth-tag failure
   }
 }
 

@@ -26,7 +26,8 @@
     "react-native-quick-base64": "2.2.2",
     "react-native-quick-crypto": "^0.7.2",
     "zustand": "^4.5.4",
-    "@noble/hashes": "^1.5.0"
+    "@noble/hashes": "^1.5.0",
+    "@noble/ciphers": "^1.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

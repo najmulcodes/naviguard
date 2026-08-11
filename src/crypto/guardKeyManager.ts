@@ -32,7 +32,15 @@ const SCRYPT_SALT_LENGTH_BYTES = 16;
 // created before this fix will fail to unlock afterward (canary won't be
 // present in old ciphertext) — expected, not a new bug. Uninstall and
 // re-run Setup on any device that was using a pre-canary build.
-const CANARY = Buffer.from('NVGRD-VALID!', 'utf8'); // exactly 12 bytes
+//
+// Kept as a plain string here, NOT Buffer.from(...) at module level —
+// calling Buffer at module-load time caused a real crash ("Property
+// 'Buffer' doesn't exist") because this module can load before index.ts's
+// Buffer polyfill has run, depending on import order. Buffer conversion
+// happens lazily inside the functions below instead, well after the app
+// has fully started and the polyfill is guaranteed to exist.
+const CANARY_STRING = 'NVGRD-VALID!'; // exactly 12 bytes in utf8
+const CANARY_LENGTH_BYTES = 12;
 
 /**
  * Same lifecycle as the native GuardKeyManager:
@@ -97,7 +105,8 @@ async function createSlot(
   const salt = randomBytes(SCRYPT_SALT_LENGTH_BYTES);
   const kek = await deriveKek(secret, salt, params);
   const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
-  const payload = Buffer.concat([CANARY, vaultKey]); // canary FIRST, then the real key
+  const canary = Buffer.from(CANARY_STRING, 'utf8'); // converted here, not at module load
+  const payload = Buffer.concat([canary, vaultKey]); // canary FIRST, then the real key
   const wrapped = aesGcmEncrypt(kek, nonce, payload);
 
   return {
@@ -142,14 +151,15 @@ export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<B
     const kek = await deriveKek(secret, salt, slot.kdfParams);
     const decrypted = aesGcmDecrypt(kek, nonce, wrapped);
 
-    if (decrypted.length !== CANARY.length + VAULT_KEY_LENGTH_BYTES) {
+    if (decrypted.length !== CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES) {
       return null; // wrong length — definitely not a real unwrap
     }
-    const canaryPart = decrypted.subarray(0, CANARY.length);
-    if (!canaryPart.equals(CANARY)) {
+    const canary = Buffer.from(CANARY_STRING, 'utf8'); // converted here, not at module load
+    const canaryPart = decrypted.subarray(0, CANARY_LENGTH_BYTES);
+    if (!canaryPart.equals(canary)) {
       return null; // wrong password — canary mismatch, the real check
     }
-    return decrypted.subarray(CANARY.length);
+    return decrypted.subarray(CANARY_LENGTH_BYTES);
   } catch {
     return null; // wrong credential, corrupt data, or a native-layer throw
   }

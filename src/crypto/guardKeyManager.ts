@@ -100,6 +100,22 @@ async function createSlot(
   const payload = Buffer.concat([canary, vaultKey]); // canary FIRST, then the real key
   const wrapped = aesGcmEncrypt(kek, nonce, payload);
 
+  // TEMPORARY DIAGNOSTIC LOGGING — remove once the unlock bug is found.
+  // Never logs the password or the derived key itself, only structural
+  // info (lengths, hex of non-secret values) needed to compare against
+  // the equivalent log in tryUnlock.
+  console.log('[NaviGuard DEBUG createSlot]', {
+    secretLength: secret.length,
+    saltB64: salt.toString('base64'),
+    saltLength: salt.length,
+    kekLength: kek.length,
+    nonceB64: nonce.toString('base64'),
+    nonceLength: nonce.length,
+    payloadLength: payload.length,
+    wrappedLength: wrapped.length,
+    kdfParams: params
+  });
+
   return {
     kdfSalt: salt.toString('base64'),
     kdfParams: params,
@@ -139,18 +155,50 @@ export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<B
     const nonce = Buffer.from(slot.gcmNonce, 'base64');
     const wrapped = Buffer.from(slot.wrappedVaultKey, 'base64');
     const kek = await deriveKek(secret, salt, slot.kdfParams);
-    const decrypted = aesGcmDecrypt(kek, nonce, wrapped);
+
+    // TEMPORARY DIAGNOSTIC LOGGING — remove once the unlock bug is found.
+    console.log('[NaviGuard DEBUG tryUnlock] before decrypt', {
+      secretLength: secret.length,
+      saltB64: salt.toString('base64'),
+      saltLength: salt.length,
+      kekLength: kek.length,
+      nonceB64: nonce.toString('base64'),
+      nonceLength: nonce.length,
+      wrappedLength: wrapped.length,
+      kdfParams: slot.kdfParams
+    });
+
+    let decrypted: Buffer;
+    try {
+      decrypted = aesGcmDecrypt(kek, nonce, wrapped);
+    } catch (decryptErr) {
+      console.log('[NaviGuard DEBUG tryUnlock] aesGcmDecrypt THREW:', String(decryptErr));
+      return null;
+    }
+
+    console.log('[NaviGuard DEBUG tryUnlock] decrypt succeeded', {
+      decryptedLength: decrypted.length,
+      expectedLength: CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES
+    });
 
     if (decrypted.length !== CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES) {
+      console.log('[NaviGuard DEBUG tryUnlock] REJECTED: length mismatch');
       return null; // wrong length — definitely not a real unwrap
     }
     const canary = Buffer.from(CANARY_STRING, 'utf8');
     const canaryPart = decrypted.subarray(0, CANARY_LENGTH_BYTES);
+    console.log('[NaviGuard DEBUG tryUnlock] canary compare', {
+      expectedHex: canary.toString('hex'),
+      gotHex: canaryPart.toString('hex')
+    });
     if (!canaryPart.equals(canary)) {
+      console.log('[NaviGuard DEBUG tryUnlock] REJECTED: canary mismatch');
       return null; // wrong password — canary mismatch
     }
+    console.log('[NaviGuard DEBUG tryUnlock] SUCCESS');
     return decrypted.subarray(CANARY_LENGTH_BYTES);
-  } catch {
+  } catch (err) {
+    console.log('[NaviGuard DEBUG tryUnlock] outer catch:', String(err));
     return null; // wrong credential, corrupt data, or an auth-tag failure
   }
 }

@@ -11,6 +11,29 @@ const VAULT_KEY_LENGTH_BYTES = 32; // AES-256
 const GCM_NONCE_LENGTH_BYTES = 12; // 96-bit, standard for GCM
 const SCRYPT_SALT_LENGTH_BYTES = 16;
 
+// Fixed 12-byte marker prepended to the Vault Key before encryption. After
+// decrypting with a candidate password, we check this marker matches
+// BEFORE trusting the result as a real Vault Key.
+//
+// Why this exists: AES-GCM's auth tag is supposed to make decryption
+// with the wrong key throw, not return garbage. During testing, ANY
+// password (including deliberately wrong ones) was successfully
+// "unlocking" the app — meaning react-native-quick-crypto's GCM
+// decryption was not reliably rejecting bad keys via the tag check
+// alone. Rather than trust that check (from a library that's already
+// been missing documented functions — see deriveKek below), this canary
+// makes wrong-password rejection independent of whatever quick-crypto's
+// GCM implementation does or doesn't verify internally. Decrypting
+// garbage ciphertext with a wrong key produces effectively random bytes;
+// the odds of 12 random bytes matching this exact constant are 1 in
+// 2^96 — not a real risk to worry about.
+//
+// IMPORTANT: this changes the wrapped-slot payload format. Any vault
+// created before this fix will fail to unlock afterward (canary won't be
+// present in old ciphertext) — expected, not a new bug. Uninstall and
+// re-run Setup on any device that was using a pre-canary build.
+const CANARY = Buffer.from('NVGRD-VALID!', 'utf8'); // exactly 12 bytes
+
 /**
  * Same lifecycle as the native GuardKeyManager:
  *   1. generateVaultKey()   — the one real secret, created once per vault
@@ -57,7 +80,12 @@ function aesGcmDecrypt(key: Buffer, nonce: Buffer, ciphertextAndTag: Buffer): Bu
   const ciphertext = ciphertextAndTag.subarray(0, ciphertextAndTag.length - 16);
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
   decipher.setAuthTag(authTag);
-  // Throws if the tag doesn't match — that's how we detect "wrong password"
+  // NOTE: this throwing on a bad tag is what SHOULD detect a wrong
+  // password. Testing showed it isn't reliable on its own with this
+  // library — see the CANARY check in tryUnlock, which is the real
+  // safety net now. This function/comment is left as-is deliberately;
+  // whatever quick-crypto does here, right or wrong, no longer matters
+  // on its own.
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
@@ -69,7 +97,8 @@ async function createSlot(
   const salt = randomBytes(SCRYPT_SALT_LENGTH_BYTES);
   const kek = await deriveKek(secret, salt, params);
   const nonce = randomBytes(GCM_NONCE_LENGTH_BYTES);
-  const wrapped = aesGcmEncrypt(kek, nonce, vaultKey);
+  const payload = Buffer.concat([CANARY, vaultKey]); // canary FIRST, then the real key
+  const wrapped = aesGcmEncrypt(kek, nonce, payload);
 
   return {
     kdfSalt: salt.toString('base64'),
@@ -101,8 +130,9 @@ export function createMasterSlot(
 
 /**
  * Attempts to unwrap [slot] using [secret]. Returns null on wrong
- * password/master-password (GCM auth tag mismatch) rather than throwing —
- * that's the expected, non-exceptional "try again" path.
+ * password/master-password. The real check is the CANARY comparison
+ * below, not just whichever exception GCM decryption may or may not
+ * throw — see the comment on CANARY above for why.
  */
 export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<Buffer | null> {
   try {
@@ -110,9 +140,18 @@ export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<B
     const nonce = Buffer.from(slot.gcmNonce, 'base64');
     const wrapped = Buffer.from(slot.wrappedVaultKey, 'base64');
     const kek = await deriveKek(secret, salt, slot.kdfParams);
-    return aesGcmDecrypt(kek, nonce, wrapped);
+    const decrypted = aesGcmDecrypt(kek, nonce, wrapped);
+
+    if (decrypted.length !== CANARY.length + VAULT_KEY_LENGTH_BYTES) {
+      return null; // wrong length — definitely not a real unwrap
+    }
+    const canaryPart = decrypted.subarray(0, CANARY.length);
+    if (!canaryPart.equals(CANARY)) {
+      return null; // wrong password — canary mismatch, the real check
+    }
+    return decrypted.subarray(CANARY.length);
   } catch {
-    return null; // wrong credential — auth tag mismatch, not a crash
+    return null; // wrong credential, corrupt data, or a native-layer throw
   }
 }
 

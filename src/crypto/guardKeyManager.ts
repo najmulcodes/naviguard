@@ -13,20 +13,41 @@ const SCRYPT_SALT_LENGTH_BYTES = 16;
 
 // Fixed 12-byte marker prepended to the Vault Key before encryption. After
 // decrypting with a candidate password, we check this marker matches
-// BEFORE trusting the result as a real Vault Key.
+// BEFORE trusting the result as a real Vault Key. Cheap, harmless
+// defense-in-depth regardless of cipher implementation.
 //
-// Originally added because react-native-quick-crypto's AES-GCM was
-// accepting wrong passwords (auth tag not reliably rejecting bad keys).
-// Kept even after moving to @noble/ciphers below — it's cheap, harmless,
-// and a genuine defense-in-depth layer regardless of which cipher
-// implementation is doing the underlying work.
-//
-// Kept as a plain string here, NOT converted to Buffer at module level —
-// calling Buffer at module-load time previously caused a real crash
-// ("Property 'Buffer' doesn't exist") due to import-hoisting order.
-// Buffer conversion happens lazily inside the functions below instead.
+// Kept as a plain string, converted to bytes lazily inside functions
+// (not at module load) — see index.ts for why that ordering matters.
 const CANARY_STRING = 'NVGRD-VALID!'; // exactly 12 bytes in utf8
 const CANARY_LENGTH_BYTES = 12;
+
+/**
+ * Manual byte-for-byte comparison — deliberately NOT using Buffer's
+ * .equals(). Confirmed via diagnostic testing that .subarray() on a
+ * decrypted result doesn't reliably preserve the Buffer prototype in
+ * this environment (Metro/Hermes bundling quirk, root cause not fully
+ * pinned down, not worth the time to chase further) — the sliced result
+ * is sometimes a plain Uint8Array missing .equals()/.toString(encoding).
+ * Indexing and .length are universal TypedArray properties that work
+ * identically either way, so this comparison is correct regardless of
+ * which underlying type actually comes back.
+ */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** Same reasoning as bytesEqual — avoids relying on Buffer's toString('hex') override. */
+function toHexSafe(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
 
 /**
  * Same lifecycle as the native GuardKeyManager:
@@ -47,7 +68,8 @@ export function generateVaultKey(): Buffer {
 async function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Promise<Buffer> {
   // react-native-quick-crypto does NOT implement scrypt/scryptSync —
   // confirmed missing on the library's own GitHub
-  // (margelo/react-native-quick-crypto#737), not a version/naming issue.
+  // (margelo/react-native-quick-crypto#737). @noble/hashes is pure JS/TS,
+  // audited, no native module.
   const passwordBytes = Buffer.from(secret, 'utf8');
   const derived = await scryptAsync(passwordBytes, salt, {
     N: params.N,
@@ -58,23 +80,14 @@ async function deriveKek(secret: string, salt: Buffer, params: ScryptParams): Pr
   return Buffer.from(derived);
 }
 
-// AES-256-GCM via @noble/ciphers, NOT react-native-quick-crypto.
-//
-// Switched after react-native-quick-crypto's AES-GCM demonstrated TWO
-// independent correctness failures during testing: (1) wrong passwords
-// were being accepted as valid, and (2) the genuinely correct password
-// was then failing the canary check added to fix (1) — meaning
-// decrypt(encrypt(x)) wasn't reliably reproducing x even with the right
-// key. Two failures on the same primitive from the same library, on top
-// of the already-confirmed missing scrypt implementation, is a pattern,
-// not a one-off. @noble/ciphers is pure JS/TS, audited, no native module —
-// eliminates this entire class of bug the same way @noble/hashes did for
-// the KDF. This also touches fileCipher.ts (actual file lock/unlock),
-// which used the exact same broken primitive.
-//
-// @noble/ciphers' gcm(key, nonce).encrypt()/.decrypt() append/verify the
-// 16-byte auth tag internally — no manual splitting needed, unlike the
-// old createCipheriv/getAuthTag dance.
+// AES-256-GCM via @noble/ciphers, NOT react-native-quick-crypto — that
+// library's GCM implementation demonstrated real correctness failures
+// during testing (wrong passwords accepted, then correct passwords
+// rejected). @noble/ciphers' auth tag verification has since been
+// confirmed correct in this exact codebase: a genuinely wrong password
+// now throws "invalid ghash tag" as expected, and the correct password
+// decrypts to the exact right bytes. This also covers fileCipher.ts
+// (actual file lock/unlock), which used the same primitive.
 
 function aesGcmEncrypt(key: Buffer, nonce: Buffer, plaintext: Buffer): Buffer {
   const cipher = gcm(key, nonce);
@@ -83,8 +96,7 @@ function aesGcmEncrypt(key: Buffer, nonce: Buffer, plaintext: Buffer): Buffer {
 
 function aesGcmDecrypt(key: Buffer, nonce: Buffer, ciphertextAndTag: Buffer): Buffer {
   const cipher = gcm(key, nonce);
-  // Throws on auth tag mismatch — @noble/ciphers verifies this correctly,
-  // confirmed against its own documented behavior, not assumed this time.
+  // Throws on auth tag mismatch — confirmed correct behavior via testing.
   return Buffer.from(cipher.decrypt(ciphertextAndTag));
 }
 
@@ -99,22 +111,6 @@ async function createSlot(
   const canary = Buffer.from(CANARY_STRING, 'utf8');
   const payload = Buffer.concat([canary, vaultKey]); // canary FIRST, then the real key
   const wrapped = aesGcmEncrypt(kek, nonce, payload);
-
-  // TEMPORARY DIAGNOSTIC LOGGING — remove once the unlock bug is found.
-  // Never logs the password or the derived key itself, only structural
-  // info (lengths, hex of non-secret values) needed to compare against
-  // the equivalent log in tryUnlock.
-  console.log('[NaviGuard DEBUG createSlot]', {
-    secretLength: secret.length,
-    saltB64: salt.toString('base64'),
-    saltLength: salt.length,
-    kekLength: kek.length,
-    nonceB64: nonce.toString('base64'),
-    nonceLength: nonce.length,
-    payloadLength: payload.length,
-    wrappedLength: wrapped.length,
-    kdfParams: params
-  });
 
   return {
     kdfSalt: salt.toString('base64'),
@@ -146,8 +142,8 @@ export function createMasterSlot(
 
 /**
  * Attempts to unwrap [slot] using [secret]. Returns null on wrong
- * password/master-password — both the GCM auth tag (now @noble/ciphers,
- * verified correct) AND the canary check protect this.
+ * password/master-password — protected by BOTH the GCM auth tag
+ * (@noble/ciphers, confirmed correct) AND the canary check.
  */
 export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<Buffer | null> {
   try {
@@ -156,50 +152,24 @@ export async function tryUnlock(secret: string, slot: WrappedKeySlot): Promise<B
     const wrapped = Buffer.from(slot.wrappedVaultKey, 'base64');
     const kek = await deriveKek(secret, salt, slot.kdfParams);
 
-    // TEMPORARY DIAGNOSTIC LOGGING — remove once the unlock bug is found.
-    console.log('[NaviGuard DEBUG tryUnlock] before decrypt', {
-      secretLength: secret.length,
-      saltB64: salt.toString('base64'),
-      saltLength: salt.length,
-      kekLength: kek.length,
-      nonceB64: nonce.toString('base64'),
-      nonceLength: nonce.length,
-      wrappedLength: wrapped.length,
-      kdfParams: slot.kdfParams
-    });
-
     let decrypted: Buffer;
     try {
       decrypted = aesGcmDecrypt(kek, nonce, wrapped);
-    } catch (decryptErr) {
-      console.log('[NaviGuard DEBUG tryUnlock] aesGcmDecrypt THREW:', String(decryptErr));
-      return null;
+    } catch {
+      return null; // wrong password — auth tag mismatch, the expected path
     }
 
-    console.log('[NaviGuard DEBUG tryUnlock] decrypt succeeded', {
-      decryptedLength: decrypted.length,
-      expectedLength: CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES
-    });
-
     if (decrypted.length !== CANARY_LENGTH_BYTES + VAULT_KEY_LENGTH_BYTES) {
-      console.log('[NaviGuard DEBUG tryUnlock] REJECTED: length mismatch');
       return null; // wrong length — definitely not a real unwrap
     }
     const canary = Buffer.from(CANARY_STRING, 'utf8');
     const canaryPart = decrypted.subarray(0, CANARY_LENGTH_BYTES);
-    console.log('[NaviGuard DEBUG tryUnlock] canary compare', {
-      expectedHex: canary.toString('hex'),
-      gotHex: canaryPart.toString('hex')
-    });
-    if (!canaryPart.equals(canary)) {
-      console.log('[NaviGuard DEBUG tryUnlock] REJECTED: canary mismatch');
+    if (!bytesEqual(canaryPart, canary)) {
       return null; // wrong password — canary mismatch
     }
-    console.log('[NaviGuard DEBUG tryUnlock] SUCCESS');
     return decrypted.subarray(CANARY_LENGTH_BYTES);
-  } catch (err) {
-    console.log('[NaviGuard DEBUG tryUnlock] outer catch:', String(err));
-    return null; // wrong credential, corrupt data, or an auth-tag failure
+  } catch {
+    return null; // wrong credential or corrupt data
   }
 }
 

@@ -93,7 +93,7 @@ export default function SettingsScreen() {
           onPress={() => {
             const body = `My account email: ${email ?? ''}\n(Sent from NaviGuard settings.)`;
             Linking.openURL(
-              `mailto:?subject=${encodeURIComponent('NaviGuard recovery request')}&body=${encodeURIComponent(body)}`
+              `mailto:support@navicore.co?subject=${encodeURIComponent('NaviGuard recovery request')}&body=${encodeURIComponent(body)}`
             );
           }}
         >

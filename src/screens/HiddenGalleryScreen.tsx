@@ -200,6 +200,7 @@ export default function HiddenGalleryScreen() {
     if (!activeFolder || !vaultKey || selected.size === 0) return;
     const targets = images.filter((f) => selected.has(f.uri) && !f.isLocked);
     setBusy(true);
+    const failures: string[] = [];
     const gen: AsyncGenerator<VaultProgress> = VaultFolderManager.lockFiles(
       activeFolder,
       targets,
@@ -208,10 +209,22 @@ export default function HiddenGalleryScreen() {
     for await (const result of gen) {
       if (result.type === 'progress') {
         setProgressText(`Hiding ${result.current}/${result.total} — ${result.fileName}`);
+      } else if (result.type === 'failed') {
+        // Previously silently swallowed — a file could fail to fully hide
+        // (e.g. encrypted copy created but original delete blocked) with
+        // zero feedback, leaving both copies sitting on disk looking like
+        // nothing happened.
+        console.log('[NaviGuard DEBUG] lock failed for', result.fileName, String(result.error));
+        failures.push(result.fileName);
       }
     }
     setBusy(false);
     setSelected(new Set());
+    if (failures.length > 0) {
+      setProgressText(`Failed to hide: ${failures.join(', ')} — see terminal log for the real error`);
+    } else {
+      setProgressText('');
+    }
     await openFolder(activeFolder); // refresh — hidden photos now show as locked thumbnails
   }
 
@@ -308,8 +321,14 @@ export default function HiddenGalleryScreen() {
             🔒 already hidden · 🔓 tap to select, then Hide
           </Text>
 
-          {busy && (
-            <Text style={{ color: colors.textSecondary, marginHorizontal: 20, marginBottom: 8 }}>
+          {progressText.length > 0 && (
+            <Text
+              style={{
+                color: progressText.startsWith('Failed') ? colors.danger : colors.textSecondary,
+                marginHorizontal: 20,
+                marginBottom: 8
+              }}
+            >
               {progressText}
             </Text>
           )}

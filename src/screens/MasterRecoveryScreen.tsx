@@ -21,7 +21,7 @@ export default function MasterRecoveryScreen() {
   function sendRecoveryEmail() {
     const body = `My account email: ${recoveryEmail ?? '(not set)'}\n\nI've forgotten my NaviGuard password and need the master password to recover access.`;
     Linking.openURL(
-      `mailto:?subject=${encodeURIComponent('NaviGuard recovery request')}&body=${encodeURIComponent(body)}`
+      `mailto:support@navicore.co?subject=${encodeURIComponent('NaviGuard recovery request')}&body=${encodeURIComponent(body)}`
     );
   }
 

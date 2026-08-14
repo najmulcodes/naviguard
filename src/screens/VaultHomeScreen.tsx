@@ -104,7 +104,7 @@ export default function VaultHomeScreen() {
         {!folderUri ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <Text style={[shared.sectionTitle, { textAlign: 'center' }]}>
-              Select a folder on your USB drive to guard
+              Select a folder to guard — USB drive or phone storage
             </Text>
             <Text style={shared.body}>
               Only the top-level files in the folder you pick are guarded — subfolders aren't

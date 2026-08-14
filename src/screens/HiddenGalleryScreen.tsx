@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Modal,
@@ -199,8 +200,22 @@ export default function HiddenGalleryScreen() {
   async function hideSelected() {
     if (!activeFolder || !vaultKey || selected.size === 0) return;
     const targets = images.filter((f) => selected.has(f.uri) && !f.isLocked);
+
+    // Surfacing this on-device now, not just in the PC terminal — if
+    // targets is empty here, NOTHING will be attempted at all, which
+    // looks identical to "silently failed" from the outside. This
+    // makes that distinction visible immediately.
+    if (targets.length === 0) {
+      Alert.alert(
+        'Nothing to hide',
+        `${selected.size} file(s) were selected, but 0 matched the "unlocked" filter. This means the selection state and the actual file list have gotten out of sync — a bug, not a permissions issue.`
+      );
+      return;
+    }
+
     setBusy(true);
-    const failures: string[] = [];
+    const failures: { name: string; error: string }[] = [];
+    let succeeded = 0;
     const gen: AsyncGenerator<VaultProgress> = VaultFolderManager.lockFiles(
       activeFolder,
       targets,
@@ -210,21 +225,30 @@ export default function HiddenGalleryScreen() {
       if (result.type === 'progress') {
         setProgressText(`Hiding ${result.current}/${result.total} — ${result.fileName}`);
       } else if (result.type === 'failed') {
-        // Previously silently swallowed — a file could fail to fully hide
-        // (e.g. encrypted copy created but original delete blocked) with
-        // zero feedback, leaving both copies sitting on disk looking like
-        // nothing happened.
-        console.log('[NaviGuard DEBUG] lock failed for', result.fileName, String(result.error));
-        failures.push(result.fileName);
+        const errorText = String(result.error);
+        console.log('[NaviGuard DEBUG] lock failed for', result.fileName, errorText);
+        failures.push({ name: result.fileName, error: errorText });
+      } else if (result.type === 'done') {
+        succeeded = result.filesProcessed - failures.length;
       }
     }
     setBusy(false);
     setSelected(new Set());
+
+    // Shown directly on-device — no need to also check the PC terminal.
     if (failures.length > 0) {
-      setProgressText(`Failed to hide: ${failures.join(', ')} — see terminal log for the real error`);
+      const details = failures.map((f) => `• ${f.name}: ${f.error}`).join('\n');
+      Alert.alert(
+        `${succeeded} hidden, ${failures.length} failed`,
+        details,
+        [{ text: 'OK' }]
+      );
+      setProgressText(`Failed: ${failures.map((f) => f.name).join(', ')}`);
     } else {
+      Alert.alert('Done', `${succeeded} photo(s) hidden successfully.`);
       setProgressText('');
     }
+
     await openFolder(activeFolder); // refresh — hidden photos now show as locked thumbnails
   }
 
